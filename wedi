@@ -1,0 +1,162 @@
+#!/bin/sh
+
+#IOS : Projekt 1
+#Skript : wedi-wrapper textového editoru s možnosťou automatického výberu súboru
+#Autor : René Bolf, xbolf00@stud.fit.vutbr.cz
+#Popis : http://www.fit.vutbr.cz/study/courses/IOS/public/Lab/projekty/projekt1/projekt1.pdf
+#Datum : 28.3.2018
+
+export LC_ALL=POSIX
+export POSIXLY_CORRECT=yes
+
+edit_subor()
+{
+    if [ ! -f "$2" ]; then
+        cesta_sed=`echo "$2" | sed -e "s/\//\\\\\-\//g" -e "s/ /\\\ /g" | tr -d '-'` # doplnenie "\" aby sa spravne vykonal prikaz sed
+        echo "ERROR: subor neexistuje.">&2
+        `sed -i "/$cesta_sed$/d" "$WEDI_RC"` #vymazanie zaznamu ked uz neexistuje vo WEDI_RC
+        exit 1
+    fi
+    $1 "$2"
+    exit_code=$?
+    printf "`date +%F`|$2\n" >> $WEDI_RC #vo WEDI_RC zaznamenavam datum a cestu
+    exit $exit_code # vracia navratovy kod terminalu ak je operacia uspecna 0 ak nie tak 1
+}
+
+edit_posledny()
+{
+    posledny_edit=`grep "$1/[^/]*$" "$WEDI_RC" | cut -d '|' -f2 | tail -n 1` #prikaz vyberie posledny editovany zaznam a oreze mu datum aby ostal len nazov, tail zabezpeči to aby to bol posledny zaznam
+    if [ -z "$posledny_edit" ]; then
+        echo "ERROR: V adresari este nebol upravovany ziadny subor.">&2
+        exit 1
+    fi
+}
+
+prepinac_m()
+{
+    najviac_edit=`grep "$1/[^/]*$" "$WEDI_RC" | cut -d '|' -f2 | sort | uniq -c | sort -n | rev | cut -d ' ' -f1 | rev | tail -n 1` #prikaz vyberie najviac editovany zaznam
+    if [ -z "$najviac_edit" ]; then
+        echo "ERROR: V adresari este nebol upravovany ziadny subor.">&2
+        exit 1
+    fi
+}
+
+prepinac_l()
+{
+    editovane_subory=`grep "$1/[^/]*$" "$WEDI_RC" | cut -d '|' -f2 | sort | uniq | rev | cut -d '/' -f1 | rev` #prikaz zobrazi vsetky editovane zaznamy, ktore zoradi a spraví z nich unikatne zaznamy
+    if [ -z "$editovane_subory" ]; then
+        echo "ERROR: V adresari este nebol upravovany ziadny subor.">&2
+        exit 1
+    fi
+    echo "$editovane_subory" #zobrazenie editovanych zaznamov
+    exit 0
+}
+
+vypis_datum()
+{
+    vzor_datum=`echo "$2" | tr -d '-'` # z datumu sa odstrania "-" aby sa mohol porovnavat ako integer
+    datum_list=`grep "$3/[^/]*$" "$WEDI_RC" | cut -d '|' -f1 | uniq | sed 's/-//g'`  # orezanie datumov z WEDI_RC, pre konkretny priecinok
+
+    for datum in $datum_list; do
+        if [ "$datum" -lt "$vzor_datum" ] && [ "-b" = "$1" ]; then
+            pdatum=`echo "$datum" | sed 's/./&-/4;s/./&-/7;'` # do datumu naspat nahradime "-" na spravne miesta
+            vypis=`grep "$3/[^/]*$" "$WEDI_RC" | grep "$pdatum" | rev | cut -d '/' -f1 | rev | sort | uniq` #vypis datumov z konkretneho priecinka, ked je zhoda s pdatum
+            echo "$vypis"
+        elif [ "$datum" -ge "$vzor_datum" ] && [ "-a" = "$1" ]; then
+            pdatum=`echo "$datum" | sed 's/./&-/4;s/./&-/7;'` # do datumu naspat nahradime "-" na spravne miesta
+            vypis=`grep "$3/[^/]*$" "$WEDI_RC" | grep "$pdatum" | rev | cut -d '/' -f1 | rev | sort | uniq` #vypis datumov z konkretneho priecinka, ked je zhoda s pdatum
+            echo "$vypis"
+        fi
+    done
+    exit 0
+}
+
+#******************************************************************************#
+#testovanie ci je nastavena utilita realpath
+`realpath . > /dev/null 2>&1`
+test_code=$?
+if [ $test_code -ne 0 ]; then
+    echo "ERROR: Na tomto stroji utilita realpath neni dostupna.">&2
+    exit $test_code
+fi
+
+#testovanie WEDI_RC
+if [ -z "$WEDI_RC" ]; then
+    echo "ERROR: Premenna WEDI_RC nie je nastavena.">&2
+    exit 1
+elif [ ! -f "$WEDI_RC" ]; then
+    cesta_WEDI_RC=`echo "$WEDI_RC" | rev | cut -d '/' -f2- | rev`
+    `mkdir -p "$cesta_WEDI_RC" && touch "$WEDI_RC"` #vytvorenie adresarovej struktury a zaroven suboru
+fi
+
+#kontorla ci je editor a visual nastaveny a  v com sa to bude editovat
+if [ -z "$EDITOR" ] && [ -z "$VISUAL" ]; then
+    edit_nastroj=`vi`
+elif [ -z "$EDITOR" ]; then
+    edit_nastroj=$VISUAL
+else
+    edit_nastroj=$EDITOR
+fi
+
+#******************************************************************************#
+
+if [ -f "$1" ] && [ 1 -eq "$#" ]; then
+    arg_cesta=`realpath "$1"`
+    edit_subor $edit_nastroj "$arg_cesta"
+elif [ 0 -eq "$#" ]; then
+    arg_cesta=`pwd`
+    edit_posledny "$arg_cesta"
+    edit_subor $edit_nastroj "$posledny_edit"
+elif [ -d "$1" ] && [ 1 -eq "$#" ]; then
+    arg_cesta=`realpath "$1"`
+    edit_posledny "$arg_cesta"
+    edit_subor $edit_nastroj "$posledny_edit"
+fi
+case "$1" in
+    "-m")
+    if [ 1 -eq "$#" ]; then
+        arg_cesta=`pwd`
+        prepinac_m "$arg_cesta"
+        edit_subor $edit_nastroj "$najviac_edit"
+    elif  [ -d "$2" ] && [ 2 -eq "$#" ]; then
+        arg_cesta=`realpath "$2"`
+        prepinac_m "$arg_cesta"
+        edit_subor $edit_nastroj "$najviac_edit"
+    fi
+    ;;
+    "-l")
+    if [ 1 -eq "$#" ]; then
+        arg_cesta=`pwd`
+        prepinac_l "$arg_cesta"
+    elif [ -d "$2" ] && [ 2 -eq "$#" ]; then
+        arg_cesta=`realpath "$2"`
+        prepinac_l "$arg_cesta"
+    else
+        exit 1
+    fi
+    ;;
+    "-b"|"-a")
+    if ! echo "$2" | grep -qE "^[0-9]{4}-[0-1][0-9]-[0-3][0-9]$" ; then #nastavenie masky pre datum
+        echo "ERROR: Datum je nespravne zadany. Zadajte ho vo formate YYYY-MM-DD.">&2
+        exit 1
+    fi
+    if [ 2 -eq "$#" ]; then
+        arg_cesta=`pwd`
+        vypis_datum "$1" "$2" "$arg_cesta"
+    elif [ -d "$3" ] && [ 3 -eq "$#" ]; then
+        arg_cesta=`realpath "$3"`
+        vypis_datum "$1" "$2" "$arg_cesta"
+    elif [ ! -d "$3" ]; then
+        echo "ERROR: Chybne zadane argumenty.">&2
+        exit 1
+    fi
+    ;;
+    *)
+    if [ ! -f "$1" ] && [ 1 -eq "$#" ]; then
+        arg_cesta=`realpath "$1"`
+        edit_subor $edit_nastroj "$arg_cesta"
+    fi
+    echo "ERROR: Chybne zadane argumenty.">&2
+    exit 1
+    ;;
+esac
